@@ -1,0 +1,70 @@
+# FCEA3LAB の mac 版（Apple Silicon / Intel）を GitHub Actions でビルドする。
+# リポジトリの Actions タブ → "build-macos" → "Run workflow" で実行し、
+# 終わったら実行ページ下部の Artifacts から tar.gz を取得する。
+# ランナーと Homebrew gcc@14 の組合せは上流 nasa/cea の basic_build.yml と同じ。
+name: build-macos
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+jobs:
+  build:
+    name: ${{ matrix.label }}
+    runs-on: ${{ matrix.runs_on }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: macos-arm64
+            runs_on: macos-14
+          - label: macos-x86_64
+            runs_on: macos-15-intel
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install gfortran and cmake
+        run: |
+          brew update
+          brew install gcc@14 cmake
+          echo "FC=$(brew --prefix)/bin/gfortran-14" >> "$GITHUB_ENV"
+
+      - name: Build and smoke test
+        run: sh build_unix.sh
+
+      - name: Pack (tar keeps the executable bit)
+        run: |
+          NAME="FCEA3LAB-1.1-${{ matrix.label }}"
+          cp -R FCEA3LAB "$NAME"
+          tar -czf "$NAME.tar.gz" "$NAME"
+          shasum -a 256 "$NAME.tar.gz"
+
+      - name: Double-click scenario (start in the home folder, type only the name)
+        run: |
+          cd ~
+          echo n2o_paraffin | "$GITHUB_WORKSPACE/FCEA3LAB/FCEA3LAB" | tee lookup.log
+          grep -q "samples/n2o_paraffin.out" lookup.log
+          rm -f "$GITHUB_WORKSPACE/FCEA3LAB/samples/n2o_paraffin.out"
+
+      - name: Sample outputs (for cross-platform comparison)
+        run: |
+          mkdir -p outputs
+          cp samples/*.inp outputs/
+          cd outputs
+          for f in *.inp; do ../FCEA3LAB/FCEA3LAB "${f%.inp}" > /dev/null; done
+          rm -f *.inp
+          cd ..
+          tar -czf "outputs-${{ matrix.label }}.tar.gz" outputs
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: FCEA3LAB-1.1-${{ matrix.label }}
+          path: FCEA3LAB-1.1-${{ matrix.label }}.tar.gz
+          retention-days: 30
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: outputs-${{ matrix.label }}
+          path: outputs-${{ matrix.label }}.tar.gz
+          retention-days: 30

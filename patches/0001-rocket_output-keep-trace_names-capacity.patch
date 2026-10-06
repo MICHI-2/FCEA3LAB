@@ -1,0 +1,35 @@
+Subject: [PATCH] legacy CLI rocket_output: do not shrink trace_names between cases
+
+rocket_output allocates trace_names(num_products) once, then inside the case
+loop does `trace_names = trace_names(:num_trace)`. With F2003 reallocation on
+assignment this shrinks the array to the first case's trace count. A later case
+(next o/f, or the frozen block after the equilibrium block) with more trace
+species writes past the end -> heap corruption (Windows 0xC0000374).
+-fcheck=all: "Index '151' of dimension 1 of array 'trace_names' above upper
+bound of 150" at main.f90:3056. Downstream uses only trace_names(1:num_trace),
+so the shrink is unnecessary. Output-only path; solver numerics unaffected.
+
+Found 2026-10-04 on nasa/cea main 2f79a64 (v3.3.4+18). Reproduced with the
+local gfortran 14.3 build and the v3.3.4 release cea.exe (gfortran and ifx).
+Repro: `prob ro eq fr nfz=2 p,bar=30 o/f=4 supar=3.58` / N2O 298.15 K + Paraffin.
+
+diff --git a/source/main.f90 b/source/main.f90
+index 582fa20..c42ca24 100644
+--- a/source/main.f90
++++ b/source/main.f90
+@@ -3056,7 +3056,6 @@ contains
+                             trace_names(num_trace) = solver%eq_solver%products%species_names(ii)
+                         end if
+                     end do
+-                    trace_names = trace_names(:num_trace)
+ 
+                     ! Print the mole or mass fractions
+                     write(ioout, *) ""
+@@ -3482,7 +3481,6 @@ contains
+                                 trace_names(num_trace) = solver%eq_solver%products%species_names(ii)
+                             end if
+                         end do
+-                        trace_names = trace_names(:num_trace)
+ 
+                         ! Print the mole or mass fractions
+                         write(ioout, *) ""

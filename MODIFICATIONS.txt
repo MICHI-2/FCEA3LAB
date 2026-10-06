@@ -1,0 +1,45 @@
+FCEA3LAB modifications to NASA CEA
+==================================
+
+FCEA3LAB is an unofficial build of NASA CEA (https://github.com/nasa/cea),
+version 3.3.4, commit 2f79a64 (v3.3.4-18-g2f79a64, 2026-09-25). It is not a
+NASA release. The original work is licensed under the Apache License 2.0
+(LICENSE.txt, NOTICE.txt). The following files were changed (full diffs in
+patches/):
+
+0001-rocket_output-keep-trace_names-capacity.patch
+  source/main.f90
+  Bug fix in the legacy CLI. rocket_output shrank the trace_names array to the
+  first case's trace-species count; a later case (next o/f, or the frozen block
+  after the equilibrium block) with more trace species wrote past the end of
+  the array (heap corruption, Windows exit code 0xC0000374). The two shrinking
+  assignments were removed. Output path only; solver numerics unchanged.
+
+0002-fcea3lab-portable-interactive-cli.patch
+  source/main.f90, source/CMakeLists.txt, source/fcea3lab.F90 (new)
+  - FCEA2-style interactive mode when started without arguments.
+  - thermo.lib / trans.lib are also searched in the executable's directory and
+    its data/ subdirectory, after the working directory and CEA_DATA_DIR.
+  - Console banner identifying the unofficial build, database paths reported on
+    the console and at the top of the .out file.
+  Solver numerics unchanged.
+
+0003-fcea3lab-plt-plot-file.patch
+  source/main.f90, source/fcea3lab.F90
+  CEA2-compatible .plt plot file for the "plot" keyword of the output dataset
+  (accepted but ignored by the upstream v3 legacy CLI). CEA2 variable-name
+  rules, format and row order; verified against FCEA2. Where CEA2 writes 0
+  because of internal bookkeeping, the actual value is written. Shock problems
+  produce no rows. Solver numerics unchanged.
+
+0004-fcea3lab-input-lookup.patch
+  source/main.f90, source/fcea3lab.F90
+  Friendlier input-file lookup: a name not found in the working directory is
+  also looked up next to the executable and in its samples/ folder (a double-clicked program on macOS
+  starts in the home folder); paths dropped into the terminal are accepted
+  (quotes and backslash-escaped blanks removed); the searched folders are
+  printed when the file is not found. Solver numerics unchanged.
+
+The executable is renamed from "cea" to "FCEA3LAB". The bundled thermo.lib and
+trans.lib are compiled from the unmodified data/thermo.inp and data/trans.inp
+of the same upstream commit.

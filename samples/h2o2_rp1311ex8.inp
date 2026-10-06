@@ -1,0 +1,7 @@
+# RP-1311 Example 8: H2(L)/O2(L) IAC (benchmark)
+prob case=Example-8 ro eq fr nfz=1 p,psia=783.3 pi/p=10,100,1000 subar=1.58 supar=25,50,75 o/f=5.55157
+react
+  fuel=H2(L) wt=100 t,k=20.27
+  oxid=O2(L) wt=100 t,k=90.17
+output siunits
+end

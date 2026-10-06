@@ -1,0 +1,6 @@
+# Pure N2O adiabatic decomposition (monopropellant / flashback safety)
+prob case=n2o_decomp hp p,bar=1,10,50
+react
+  name=N2O wt=100 t,k=298.15
+output siunits trans
+end

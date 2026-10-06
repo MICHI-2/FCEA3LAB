@@ -1,0 +1,7 @@
+# N2O gas 298 K / database Paraffin (thermo record corrected in v3.2.1)
+prob case=n2o_paraffin ro eq p,bar=30 o/f=4,6,7,8,10 supar=3.58
+react
+  oxid=N2O wt=100 t,k=298.15
+  fuel=Paraffin wt=100 t,k=298.15
+output siunits
+end

@@ -1,0 +1,198 @@
+Subject: [PATCH] FCEA3LAB: friendlier input-file lookup (double-click on macOS)
+
+On macOS (and Linux file managers) a double-clicked command-line program runs
+in a terminal whose working directory is the home folder, not the program's
+folder, so typing a case name that sits next to the program failed with
+"Could not locate input file".
+
+- If <name>.inp is not in the working directory, it is also looked up next
+  to the executable and in its samples/ folder; the .out/.plt are then
+  written next to that input.
+- The typed name is cleaned like a path dropped into a terminal: surrounding
+  quotes removed, backslash-escaped blanks ("My\ Folder") restored, tabs and
+  trailing blanks trimmed. Dragging the .inp into the prompt now works.
+- When the file is still not found, the working folder and the program folder
+  that were searched are printed.
+- The output file path is printed on the console.
+
+New helpers get_cwd and clean_path_input in source/fcea3lab.F90.
+The banner version is bumped to FCEA3LAB 1.1 (1.0 was distributed without this patch).
+Solver numerics unchanged. Apply after 0003.
+
+diff --git a/source/fcea3lab.F90 b/source/fcea3lab.F90
+index 8444a14..a62ff3b 100644
+--- a/source/fcea3lab.F90
++++ b/source/fcea3lab.F90
+@@ -16,7 +16,7 @@ module fcea3lab
+     use, intrinsic :: iso_fortran_env, only: dp => real64
+     implicit none
+     private
+-    public :: fcea3lab_banner, get_exe_dir
++    public :: fcea3lab_banner, get_exe_dir, get_cwd, clean_path_input
+     public :: plot_point, plot_setup, plot_active, plot_add, plot_flush, plot_n
+ 
+     integer, parameter :: plot_max_vars = 20
+@@ -46,7 +46,7 @@ module fcea3lab
+     logical :: plot_opened = .false.
+ 
+     character(*), parameter :: fcea3lab_banner = &
+-        'FCEA3LAB 1.0 -- unofficial build of NASA CEA 3.3.4 with local patches (not a NASA release)'
++        'FCEA3LAB 1.1 -- unofficial build of NASA CEA 3.3.4 with local patches (not a NASA release)'
+ 
+     interface
+ #if defined(CEA_OS_WINDOWS)
+@@ -72,11 +72,84 @@ module fcea3lab
+             integer(c_size_t), value :: bufsize
+             integer(c_intptr_t) :: readlink
+         end function
++#endif
++#if defined(CEA_OS_WINDOWS)
++        function c_getcwd(buf, size) bind(C, name='_getcwd')
++            import :: c_ptr, c_char, c_int
++            character(kind=c_char) :: buf(*)
++            integer(c_int), value :: size
++            type(c_ptr) :: c_getcwd
++        end function
++#else
++        function c_getcwd(buf, size) bind(C, name='getcwd')
++            import :: c_ptr, c_char, c_size_t
++            character(kind=c_char) :: buf(*)
++            integer(c_size_t), value :: size
++            type(c_ptr) :: c_getcwd
++        end function
+ #endif
+     end interface
+ 
+ contains
+ 
++    function get_cwd() result(dir)
++        ! Current working directory, or an empty string if unavailable.
++        character(:), allocatable :: dir
++        integer, parameter :: nmax = 4096
++        character(kind=c_char) :: buf(nmax)
++        type(c_ptr) :: p
++        integer :: n
++        buf = c_null_char
++#if defined(CEA_OS_WINDOWS)
++        p = c_getcwd(buf, int(nmax, c_int))
++#else
++        p = c_getcwd(buf, int(nmax, c_size_t))
++#endif
++        dir = ''
++        if (.not. c_associated(p)) return
++        n = 0
++        do while (n < nmax)
++            if (buf(n+1) == c_null_char) exit
++            n = n + 1
++        end do
++        dir = repeat(' ', n)
++        do n = 1, len(dir)
++            dir(n:n) = buf(n)
++        end do
++    end function
++
++    function clean_path_input(s) result(r)
++        ! Clean a file name typed or dropped into a terminal: trim blanks and
++        ! tabs, strip surrounding quotes, and undo backslash-escaped blanks
++        ! ("My\ Folder") that the macOS Terminal inserts on drag and drop.
++        character(*), intent(in) :: s
++        character(:), allocatable :: r
++        character(len(s)) :: t
++        integer :: i, j, n
++        t = s
++        do i = 1, len(t)
++            if (t(i:i) == char(9) .or. t(i:i) == char(13)) t(i:i) = ' '
++        end do
++        t = adjustl(t)
++        n = len_trim(t)
++        if (n >= 2) then
++            if ((t(1:1) == '"' .and. t(n:n) == '"') .or. (t(1:1) == "'" .and. t(n:n) == "'")) then
++                t = t(2:n-1)
++                n = n - 2
++            end if
++        end if
++        r = ''
++        i = 1
++        do while (i <= n)
++            j = i
++            if (t(i:i) == '\' .and. i < n) then
++                if (t(i+1:i+1) == ' ') j = i + 1
++            end if
++            r = r // t(j:j)
++            i = j + 1
++        end do
++    end function
++
+     function get_exe_dir() result(dir)
+         ! Directory (without trailing separator) of the running executable,
+         ! or an empty string if it cannot be determined.
+diff --git a/source/main.f90 b/source/main.f90
+index 031a9e0..1f914a2 100644
+--- a/source/main.f90
++++ b/source/main.f90
+@@ -3,8 +3,10 @@
+ !   - thermo.lib/trans.lib are also searched next to the executable
+ !   - banner and database paths are reported on the console and in the .out file
+ !   - CEA2-compatible .plt plot file for the "plot" keyword of the output dataset
++!   - input name: dragged-in paths accepted; also looked up next to the executable
+ program cea
+-    use fcea3lab, only: fcea3lab_banner, get_exe_dir, plot_point, plot_setup, plot_active, &
++    use fcea3lab, only: fcea3lab_banner, get_exe_dir, get_cwd, clean_path_input, &
++                        plot_point, plot_setup, plot_active, &
+                         plot_add, plot_flush
+     use cea_param, snl=>species_name_len, &
+                    enl=>element_name_len, &
+@@ -70,6 +72,25 @@ program cea
+     call log_info('Thermo File: '//thermo_file)
+ 
+     if (.not. exists(input_file_stem//'.inp')) then
++        ! FCEA3LAB: a double-clicked program does not start in its own folder
++        ! on macOS/Linux (the terminal opens in the home folder), so also look
++        ! next to the executable before giving up.
++        exe_dir = get_exe_dir()
++        if (len(exe_dir) > 0) then
++            if (exists(exe_dir//'/'//input_file_stem//'.inp')) then
++                input_file_stem = exe_dir//'/'//input_file_stem
++                write(stdout, '(a)') ' input file:         '//input_file_stem//'.inp'
++            else if (exists(exe_dir//'/samples/'//input_file_stem//'.inp')) then
++                input_file_stem = exe_dir//'/samples/'//input_file_stem
++                write(stdout, '(a)') ' input file:         '//input_file_stem//'.inp'
++            end if
++        end if
++    end if
++    if (.not. exists(input_file_stem//'.inp')) then
++        write(stdout, '(a)') ' Could not find '//input_file_stem//'.inp'
++        write(stdout, '(a)') '   looked in the working folder: '//get_cwd()
++        if (len(get_exe_dir()) > 0) write(stdout, '(a)') '   and next to the program:      '//get_exe_dir()//' (and its samples)'
++        write(stdout, '(a)') '   Start the program in the folder of the .inp file, or type (or drag in) the full path.'
+         call abort('Could not locate input file: '//input_file_stem)
+     end if
+ 
+@@ -112,6 +133,7 @@ program cea
+ 
+     ! Initialize the output file
+     open(1, file=input_file_stem(1:len_trim(input_file_stem))//".out", status="replace")
++    write(stdout, '(a)') ' output file:        '//input_file_stem(1:len_trim(input_file_stem))//'.out'
+     write(1, '(a)') ' '//fcea3lab_banner
+     write(1, '(a)') ' thermo database: '//thermo_file
+ 
+@@ -475,15 +497,15 @@ contains
+             call log_error('No input file name was entered')
+             call abort
+         end if
+-        line = adjustl(line)
+-        l = len_trim(line)
++        ! Accept a file dragged into the terminal (quotes, escaped blanks)
++        input_file_stem = clean_path_input(line)
++        l = len(input_file_stem)
+         if (l == 0) then
+             call log_error('No input file name was entered')
+             call abort
+         end if
+-        input_file_stem = line(1:l)
+         if (l > 4) then
+-            if (line(l-3:l) == '.inp') input_file_stem = line(1:l-4)
++            if (input_file_stem(l-3:l) == '.inp') input_file_stem = input_file_stem(1:l-4)
+         end if
+     end subroutine
+ 

@@ -1,0 +1,30 @@
+\documentclass[tikz,border=10pt]{standalone}
+\usepackage{cabin}
+
+\begin{document}
+
+\def\myfont{\fontfamily{Cabin-TLF}\selectfont\bfseries\fontsize{75}{75}\selectfont}
+
+
+\begin{tikzpicture}
+    % 1. Define the coordinates and font style
+    \def\parabolapath{(-1.7, 1.15) parabola bend (0, -0.95) (1.7, 1.15)}
+
+    % LAYER 1: Black Text
+    \node[
+        anchor=center,
+        inner sep=0pt,
+        font=\myfont,
+        text=black
+    ] at (0,0) {CEA};
+
+    % LAYER 2: Parabola with a white outline
+    \draw[white, line width=7pt] \parabolapath;
+    \draw[black, line width=3pt] \parabolapath;
+
+    % LAYER 3: Circle at the vertex
+    \filldraw[fill=black, draw=white, line width=2pt] (0, -0.95) circle (0.09);
+
+\end{tikzpicture}
+
+\end{document}

@@ -1,0 +1,7 @@
+# LOX / RP-1 rocket: Pc 70 bar, O/F 2.0-3.0, eps 16, equilibrium and frozen at the throat
+prob case=lox_rp1 ro eq fr nfz=2 p,bar=70 o/f=2,2.2,2.4,2.6,2.8,3 supar=16
+react
+  oxid=O2(L) wt=100 t,k=90.17
+  fuel=RP-1 wt=100 t,k=298.15
+output siunits
+end

@@ -1,0 +1,10 @@
+# .plt example: N2O(L) / RP-1, Pc 30 bar, O/F 4-8.
+# plot_example.plt gets one row per point (chamber, throat, exit); isp/cf are equilibrium,
+# ispfz/cffz frozen values, as in CEA2.
+prob case=plot_example ro eq fr nfz=2 p,bar=30 o/f=4,5,6,7,8 supar=3.58
+react
+  oxid=N2O(L) wt=100 t,k=293.15 h,kj/mol=70.37 N 2 O 1
+  fuel=RP-1 wt=100 t,k=298.15
+output siunits
+plot o/f p t gam mw isp ispfz cf cffz ae
+end

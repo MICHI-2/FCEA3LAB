@@ -1,0 +1,258 @@
+Subject: [PATCH] FCEA3LAB: portable, FCEA2-style interactive legacy CLI
+
+Local changes for FCEA3LAB, an unofficial redistributable build of the NASA
+CEA v3 legacy CLI (not a NASA release):
+
+- CEA2 (FCEA2) style interactive mode: when started without arguments the
+  program prompts for the case name and reads it from stdin, so
+  `echo name | FCEA3LAB` and double-click use work as with FCEA2.
+  (Upstream main.f90 had this as a TODO.)
+- thermo.lib / trans.lib are also searched in the executable's directory and
+  its data/ subdirectory (after the working directory and CEA_DATA_DIR), so the
+  program works from any folder without the build-time install prefix.
+  New module source/fcea3lab.F90 obtains the executable path with
+  GetModuleFileNameA (Windows), _NSGetExecutablePath (macOS) or
+  readlink(/proc/self/exe) (Linux/other POSIX).
+- A banner identifying the build as unofficial and the database paths are
+  printed on the console; the banner and thermo database path are also written
+  at the top of the .out file.
+
+Solver numerics are unchanged. Apply after 0001.
+
+diff --git a/source/CMakeLists.txt b/source/CMakeLists.txt
+index 8abe3d1..58ebd01 100644
+--- a/source/CMakeLists.txt
++++ b/source/CMakeLists.txt
+@@ -53,9 +53,15 @@ endif()
+ #=====================================================================
+ # Main application
+ #=====================================================================
+-add_executable(cea main.f90)
++add_executable(cea main.f90 fcea3lab.F90)
+ project_enable_fortran_std(cea)
+ target_link_libraries(cea PRIVATE cea::core fbasics::core)
++# FCEA3LAB: platform selection for locating the executable's directory
++if(WIN32)
++    target_compile_definitions(cea PRIVATE CEA_OS_WINDOWS)
++elseif(APPLE)
++    target_compile_definitions(cea PRIVATE CEA_OS_APPLE)
++endif()
+ install(TARGETS cea DESTINATION ${CMAKE_INSTALL_BINDIR})
+ 
+ if(WIN32)
+diff --git a/source/fcea3lab.F90 b/source/fcea3lab.F90
+new file mode 100644
+index 0000000..5f8cfa3
+--- /dev/null
++++ b/source/fcea3lab.F90
+@@ -0,0 +1,88 @@
++! FCEA3LAB support module.
++!
++! Added for FCEA3LAB (2026-10-04): an unofficial, redistributable build of the
++! NASA CEA v3 legacy CLI. Not part of the upstream NASA CEA distribution.
++!
++! Provides the directory of the running executable so that thermo.lib and
++! trans.lib shipped next to the executable are found regardless of the
++! current working directory or the build-time install prefix.
++module fcea3lab
++    use, intrinsic :: iso_c_binding
++    implicit none
++    private
++    public :: fcea3lab_banner, get_exe_dir
++
++    character(*), parameter :: fcea3lab_banner = &
++        'FCEA3LAB 1.0 -- unofficial build of NASA CEA 3.3.4 with local patches (not a NASA release)'
++
++    interface
++#if defined(CEA_OS_WINDOWS)
++        function GetModuleFileNameA(hmodule, buf, nsize) bind(C, name='GetModuleFileNameA')
++            import :: c_ptr, c_char, c_int32_t
++            type(c_ptr), value :: hmodule
++            character(kind=c_char) :: buf(*)
++            integer(c_int32_t), value :: nsize
++            integer(c_int32_t) :: GetModuleFileNameA
++        end function
++#elif defined(CEA_OS_APPLE)
++        function ns_get_executable_path(buf, bufsize) bind(C, name='_NSGetExecutablePath')
++            import :: c_char, c_int, c_int32_t
++            character(kind=c_char) :: buf(*)
++            integer(c_int32_t) :: bufsize
++            integer(c_int) :: ns_get_executable_path
++        end function
++#else
++        function readlink(path, buf, bufsize) bind(C, name='readlink')
++            import :: c_char, c_size_t, c_intptr_t
++            character(kind=c_char) :: path(*)
++            character(kind=c_char) :: buf(*)
++            integer(c_size_t), value :: bufsize
++            integer(c_intptr_t) :: readlink
++        end function
++#endif
++    end interface
++
++contains
++
++    function get_exe_dir() result(dir)
++        ! Directory (without trailing separator) of the running executable,
++        ! or an empty string if it cannot be determined.
++        character(:), allocatable :: dir
++        integer, parameter :: nmax = 4096
++        character(kind=c_char) :: buf(nmax)
++        character(len=nmax) :: path
++        integer :: n, i
++#if defined(CEA_OS_APPLE)
++        integer(c_int32_t) :: sz
++#endif
++#if defined(CEA_OS_WINDOWS)
++        n = int(GetModuleFileNameA(c_null_ptr, buf, int(nmax, c_int32_t)))
++#elif defined(CEA_OS_APPLE)
++        sz = int(nmax, c_int32_t)
++        if (ns_get_executable_path(buf, sz) == 0) then
++            n = 0
++            do while (n < nmax)
++                if (buf(n+1) == c_null_char) exit
++                n = n + 1
++            end do
++        else
++            n = 0
++        end if
++#else
++        n = int(readlink('/proc/self/exe'//c_null_char, buf, int(nmax - 1, c_size_t)))
++#endif
++        dir = ''
++        if (n <= 0 .or. n >= nmax) return
++        path = ''
++        do i = 1, n
++            path(i:i) = buf(i)
++        end do
++        do i = n, 1, -1
++            if (path(i:i) == '/' .or. path(i:i) == '\') then
++                dir = path(1:i-1)
++                return
++            end if
++        end do
++    end function
++
++end module
+diff --git a/source/main.f90 b/source/main.f90
+index c42ca24..5f28ac0 100644
+--- a/source/main.f90
++++ b/source/main.f90
+@@ -1,4 +1,9 @@
++! Modified for FCEA3LAB (2026-10-04), an unofficial redistributable build:
++!   - CEA2-style interactive mode when started without arguments
++!   - thermo.lib/trans.lib are also searched next to the executable
++!   - banner and database paths are reported on the console and in the .out file
+ program cea
++    use fcea3lab, only: fcea3lab_banner, get_exe_dir
+     use cea_param, snl=>species_name_len, &
+                    enl=>element_name_len, &
+                    R=>gas_constant
+@@ -37,9 +42,13 @@ program cea
+     type(DetonSolution), allocatable :: det_solutions(:,:,:)
+     integer :: n
+     logical :: ok
++    character(:), allocatable :: exe_dir
++    character(:), allocatable :: dirs_tmp(:)
++    integer :: k, ml, env_len, env_status
+ 
+     allocate(problems(0))
+ 
++    write(stdout, '(a)') ' '//fcea3lab_banner
+     call parse_arguments(input_file_stem, thermo_file, trans_file, compile_thermo_input, compile_trans_input)
+     call log_info('CEA Version: '//version_string)
+ 
+@@ -64,16 +73,35 @@ program cea
+ 
+     call get_data_search_dirs(data_search_dirs)
+ 
++    ! FCEA3LAB: search the executable's directory (and its data/ subdirectory)
++    ! right after the working directory and CEA_DATA_DIR
++    exe_dir = get_exe_dir()
++    if (len(exe_dir) > 0) then
++        call get_environment_variable("CEA_DATA_DIR", length=env_len, status=env_status)
++        k = 1
++        if (env_status == 0 .and. env_len > 0) k = 2
++        ml = max(len(data_search_dirs), len(exe_dir) + 5)
++        allocate(character(ml) :: dirs_tmp(size(data_search_dirs) + 2))
++        dirs_tmp(1:k) = data_search_dirs(1:k)
++        dirs_tmp(k+1) = exe_dir
++        dirs_tmp(k+2) = exe_dir//'/data'
++        dirs_tmp(k+3:) = data_search_dirs(k+1:)
++        call move_alloc(dirs_tmp, data_search_dirs)
++    end if
++
+     thermo_file = locate(thermo_file, data_search_dirs)
+     if (len(thermo_file) == 0) then
+         call abort('Could not locate thermo file: '//thermo_file)
+     end if
++    write(stdout, '(a)') ' thermo database:    '//thermo_file
+ 
+     trans_file = locate(trans_file, data_search_dirs)
+     if (len(trans_file) == 0) then
+         call log_info('Could not locate transport file: '//trans_file)
++        write(stdout, '(a)') ' transport database: (not found; transport properties unavailable)'
+     else
+         all_transport = read_transport(trans_file)
++        write(stdout, '(a)') ' transport database: '//trans_file
+     end if
+ 
+     ! Read and parse the input and data files
+@@ -82,6 +110,8 @@ program cea
+ 
+     ! Initialize the output file
+     open(1, file=input_file_stem(1:len_trim(input_file_stem))//".out", status="replace")
++    write(1, '(a)') ' '//fcea3lab_banner
++    write(1, '(a)') ' thermo database: '//thermo_file
+ 
+     ! Loop over all problem in the input file
+     do n = 1, size(problems)
+@@ -148,9 +178,11 @@ contains
+         trans_file = 'trans.lib'
+ 
+         nargs = command_argument_count()
+-        !if (nargs == 0) then
+-        !    ! TODO: Add CEA2 style interactive mode
+-        !end if
++        if (nargs == 0) then
++            ! FCEA3LAB: CEA2 (FCEA2) style interactive mode
++            call read_input_name_interactive(input_file_stem)
++            return
++        end if
+ 
+         n = 1
+         do while (n <= nargs)
+@@ -205,6 +237,33 @@ contains
+         return
+     end subroutine
+ 
++    subroutine read_input_name_interactive(input_file_stem)
++        ! Prompt for the case name like FCEA2, so that `echo name | FCEA3LAB` works.
++        character(:), allocatable, intent(out) :: input_file_stem
++        character(len=1024) :: line
++        integer :: ios, l
++
++        write(stdout, '(a)') ' ENTER INPUT FILE NAME WITHOUT .inp EXTENSION.'
++        write(stdout, '(a)') '   THE OUTPUT FILE WILL HAVE THE SAME NAME WITH EXTENSION .out'
++        write(stdout, '(a)') '   (.plt PLOT FILES ARE NOT PRODUCED BY THIS VERSION)'
++        write(stdout, '(a)') ''
++        read(stdin, '(a)', iostat=ios) line
++        if (ios /= 0) then
++            call log_error('No input file name was entered')
++            call abort
++        end if
++        line = adjustl(line)
++        l = len_trim(line)
++        if (l == 0) then
++            call log_error('No input file name was entered')
++            call abort
++        end if
++        input_file_stem = line(1:l)
++        if (l > 4) then
++            if (line(l-3:l) == '.inp') input_file_stem = line(1:l-4)
++        end if
++    end subroutine
++
+     subroutine write_problem_input(ioout, prob, separate_from_previous)
+         integer, intent(in) :: ioout
+         type(ProblemDB), intent(in) :: prob

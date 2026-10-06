@@ -1,0 +1,15 @@
+name: cea-dev
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  - cmake
+  - cython
+  - gcc
+  - gfortran
+  - gxx
+  - ninja
+  - numpy
+  - pytest
+  - python
+  - setuptools

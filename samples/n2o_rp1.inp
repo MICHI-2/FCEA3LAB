@@ -1,0 +1,9 @@
+# N2O(L) / RP-1 rocket: Pc 10-50 bar, O/F 3-10, eps 3.58, equilibrium and frozen at the throat
+# N2O(L) is not in the CEA database. 20 C saturated liquid: h = CEA gas N2O (81.600 kJ/mol at 298.15 K)
+#   + REFPROP [h_liq(293.15 K) - h_ideal-gas(298.15 K)] = 70.37 kJ/mol
+prob case=n2o_rp1 ro eq fr nfz=2 p,bar=10,30,50 o/f=3,4,5,6,7,8,10 supar=3.58
+react
+  oxid=N2O(L) wt=100 t,k=293.15 h,kj/mol=70.37 N 2 O 1
+  fuel=RP-1 wt=100 t,k=298.15
+output siunits
+end
